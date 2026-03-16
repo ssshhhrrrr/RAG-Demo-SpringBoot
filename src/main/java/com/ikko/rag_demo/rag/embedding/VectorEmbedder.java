@@ -2,6 +2,7 @@ package com.ikko.rag_demo.rag.embedding;
 
 import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.document.DocumentSplitter;
+import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.AllMiniLmL6V2QuantizedEmbeddingModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Component
@@ -21,9 +23,10 @@ public class VectorEmbedder {
     // 🌟 新增：Spring 自带的 HTTP 请求工具
     private final RestTemplate restTemplate = new RestTemplate();
 
-    public VectorEmbedder(EmbeddingStore<TextSegment> embeddingStore) {
+    // 🌟 让 Spring 把 AiConfig 里配置好的阿里云大模型塞进来
+    public VectorEmbedder(EmbeddingStore<TextSegment> embeddingStore, EmbeddingModel embeddingModel) {
         this.embeddingStore = embeddingStore;
-        this.embeddingModel = new AllMiniLmL6V2QuantizedEmbeddingModel();
+        this.embeddingModel = embeddingModel;
     }
 
     // 暴露一个专门把文字转成向量的方法（检索时用）
@@ -33,12 +36,24 @@ public class VectorEmbedder {
 
     // 暴露给存入流程的封装方法
     public void ingest(Document document, DocumentSplitter splitter) {
-        EmbeddingStoreIngestor ingestor = EmbeddingStoreIngestor.builder()
-                .documentSplitter(splitter)
-                .embeddingModel(embeddingModel)
-                .embeddingStore(embeddingStore)
-                .build();
-        ingestor.ingest(document);
+
+        List<TextSegment> segments = splitter.split(document);
+
+        int batchSize = 10;
+
+        for (int i = 0; i < segments.size(); i += batchSize) {
+
+            List<TextSegment> batch = segments.subList(
+                    i,
+                    Math.min(i + batchSize, segments.size())
+            );
+
+            List<Embedding> embeddings =
+                    embeddingModel.embedAll(batch).content();
+            System.out.println(embeddings.get(0).vector().length);
+
+            embeddingStore.addAll(embeddings, batch);
+        }
     }
 
     /**

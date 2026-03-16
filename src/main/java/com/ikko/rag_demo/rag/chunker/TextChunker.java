@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 public class TextChunker {
     // 后续如果有更复杂的按照标点符号、段落切分的逻辑，都封装在这个类里
     public DocumentSplitter getSplitter() {
-        return DocumentSplitters.recursive(500, 50);
+
+        return DocumentSplitters.recursive(800, 100);
     }
 }

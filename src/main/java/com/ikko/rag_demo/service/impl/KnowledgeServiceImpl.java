@@ -54,7 +54,8 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             throw new IllegalArgumentException("上传的文件名不能为空！");
         }
 
-        File dir = new File(uploadDir);
+//        File dir = new File(uploadDir);
+        File dir = new File(uploadDir).getAbsoluteFile();
         if (!dir.exists()) {
             dir.mkdirs();
         }
@@ -89,7 +90,7 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         dev.langchain4j.data.embedding.Embedding queryVector = vectorEmbedder.embedText(question);
 
         // 2. 检索相关片段
-        List<EmbeddingMatch<TextSegment>> matches = vectorRetriever.search(queryVector, 3, 0.6);
+        List<EmbeddingMatch<TextSegment>> matches = vectorRetriever.search(queryVector, 5, 0.5);
 
         // 3. 组装上下文和溯源信息
         List<AskResponseData.Source> sources = new ArrayList<>();

@@ -1,7 +1,9 @@
 package com.ikko.rag_demo.config;
 
 import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
+import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -32,6 +34,15 @@ public class AiConfig {
                 .apiKey(apiKey)
                 .modelName(modelName)
                 .temperature(0.3) // 设低一点，让回答更严谨，更贴合知识库原文
+                .build();
+    }
+    // 🌟 核心优化 1：注入阿里云的多语言向量模型
+    @Bean
+    public EmbeddingModel embeddingModel() {
+        return OpenAiEmbeddingModel.builder()
+                .baseUrl(baseUrl)
+                .apiKey(apiKey)
+                .modelName("text-embedding-v3") // 阿里云目前最强的多语言向量模型
                 .build();
     }
 }
