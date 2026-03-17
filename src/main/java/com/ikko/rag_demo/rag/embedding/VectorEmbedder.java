@@ -8,12 +8,15 @@ import dev.langchain4j.model.embedding.AllMiniLmL6V2QuantizedEmbeddingModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import dev.langchain4j.store.embedding.EmbeddingStoreIngestor;
+import dev.langchain4j.store.embedding.filter.Filter;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
 
 @Component
 public class VectorEmbedder {
@@ -56,27 +59,20 @@ public class VectorEmbedder {
         }
     }
 
-    /**
-     * 根据文件名，调用 Chroma 原生 API 删除旧向量
-     */
-    public void deleteByFileName(String fileName) {
-        // ⚠️ 注意：这里的 URL 中必须使用你在 Config 里配置的 collectionName（之前写的是 ai_knowledge_base）
-        String chromaUrl = "http://127.0.0.1:8000/api/v1/collections/ai_knowledge_base/delete";
+//    /**
+//     * 根据文件名，调用 Chroma 原生 API 删除旧向量
+//     */
+    public void deleteOldVectorsByFileName(String fileName) {
+    try {
+        // 构建过滤器：精准狙击所有元数据 "file_name" 等于当前文件名的切片
+        Filter filter = metadataKey("file_name").isEqualTo(fileName);
 
-        try {
-            // 组装 Chroma 要求的请求体：{"where": {"file_name": "test.txt"}}
-            Map<String, Object> requestBody = new HashMap<>();
-            Map<String, String> whereClause = new HashMap<>();
-            whereClause.put("file_name", fileName);
-            requestBody.put("where", whereClause);
-
-            // 发送 POST 请求执行精确删除
-            restTemplate.postForEntity(chromaUrl, requestBody, String.class);
-            System.out.println("🧹 [清理动作] 成功从 Chroma 中抹除 [" + fileName + "] 的历史记忆。");
-        } catch (Exception e) {
-            // 这里不抛出异常，因为如果是第一次上传，Chroma 找不到文件报错是正常的
-            System.out.println("⚠️ [清理动作] 跳过（可能是首次上传或集合不存在）");
-        }
+        // 呼叫 Chroma 执行全量删除
+        embeddingStore.removeAll(filter);
+        System.out.println("🗑️ [向量清理] 已成功清除旧文件 [" + fileName + "] 的所有历史切片！");
+    } catch (Exception e) {
+        System.err.println("❌ [向量清理] 清理失败，可能是底层数据库暂不支持此过滤操作: " + e.getMessage());
     }
+}
 
 }

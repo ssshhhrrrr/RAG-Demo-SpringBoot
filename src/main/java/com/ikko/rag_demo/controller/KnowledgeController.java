@@ -36,7 +36,7 @@ public class KnowledgeController {
             knowledgeService.processAndStoreDocument(file);
 
             // 3. 优雅返回
-            return ResponseEntity.ok(BaseResponse.success("文件 [" + fileName + "] 上传并处理成功！", null));
+            return ResponseEntity.ok(BaseResponse.success("文件 [" + fileName + "] 上传成功！", null));
 
         } catch (Exception e) {
             e.printStackTrace();

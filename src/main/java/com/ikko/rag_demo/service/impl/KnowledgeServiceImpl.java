@@ -6,10 +6,13 @@ import com.ikko.rag_demo.rag.embedding.VectorEmbedder;
 import com.ikko.rag_demo.rag.generator.LlmGenerator;
 import com.ikko.rag_demo.rag.parser.FileParser;
 import com.ikko.rag_demo.rag.retriever.VectorRetriever;
+import com.ikko.rag_demo.service.DocumentAsyncProcessor;
 import com.ikko.rag_demo.service.KnowledgeService;
+import com.ikko.rag_demo.service.TaskStatusManager;
 import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -35,6 +38,12 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     private final VectorEmbedder vectorEmbedder;
     private final VectorRetriever vectorRetriever;
     private final LlmGenerator llmGenerator;
+    // 🌟 注入刚写的异步类
+    @Autowired
+    private DocumentAsyncProcessor asyncProcessor;
+    // 依然是注入接口，Spring 会自动找到 CaffeineTaskStatusManagerImpl
+    @Autowired
+    private TaskStatusManager statusManager;
 
     public KnowledgeServiceImpl(FileParser fileParser, TextChunker textChunker,
                                 VectorEmbedder vectorEmbedder, VectorRetriever vectorRetriever,
@@ -48,63 +57,53 @@ public class KnowledgeServiceImpl implements KnowledgeService {
 
     @Override
     public void processAndStoreDocument(MultipartFile file) throws Exception {
-        // 严密的空值与格式校验
         String fileName = file.getOriginalFilename();
         if (fileName == null || fileName.trim().isEmpty()) {
             throw new IllegalArgumentException("上传的文件名不能为空！");
         }
 
-//        File dir = new File(uploadDir);
         File dir = new File(uploadDir).getAbsoluteFile();
         if (!dir.exists()) {
             dir.mkdirs();
         }
         File localFile = new File(dir, fileName);
-
-
+        // 🌟 核心升级：同名文件自动清理与覆盖逻辑
         if (localFile.exists()) {
-            throw new RuntimeException("知识库中已存在名为 [" + fileName + "] 的文件，请勿重复上传。");
-            //实际生产中要先删除
-            // A. 斩断现实：删除旧的物理文件
-//            localFile.delete();
-//
-//            // B. 抹除记忆：通知 VectorEmbedder 清理 Chroma 里的旧向量
-//            vectorEmbedder.deleteByFileName(fileName);
+            System.out.println("⚠️ [更新流程] 发现同名文件 [" + fileName + "]，正在执行覆盖更新...");
+
+            // 1. 抹除记忆：通知 VectorEmbedder 清理 Chroma 里的旧向量
+            vectorEmbedder.deleteOldVectorsByFileName(fileName);
+
+            // 2. 斩断现实：删除旧的物理文件
+            localFile.delete();
+            System.out.println("♻️ [更新流程] 旧文件及旧向量已清理完毕。");
         }
 
+        // 1. 瞬间完成：物理文件存盘
         file.transferTo(localFile);
-        System.out.println("💾 [步骤1] 新版本文件已保存至: " + localFile.getAbsolutePath());
+        System.out.println("💾 [主线程] 文件已火速保存至硬盘");
 
+        // 🌟 登记造册：状态标记为处理中
+        statusManager.setStatus(fileName, "PROCESSING");
 
-        // 🌟 核心主干逻辑：加入智能分流路由
-        Document document;
+        // 扔给后台线程 (非阻塞)
+        asyncProcessor.executeIngestionTask(localFile, fileName);
 
-        // 1. 解析 (分流处理)
-        if (fileName.toLowerCase().endsWith(".pdf")) {
-            System.out.println("🤖 检测到 PDF，正在呼叫 LlamaParse 视觉大模型进行解析...");
-            // 调用 LlamaParse 工具类获取带图注的 Markdown
-            String markdownContent = com.ikko.rag_demo.util.LlamaParseUtil.parsePdfToMarkdown(localFile);
-
-            // 包装成 LangChain4j 的 Document，注意这里的元数据 key 要和你检索时用的 "file_name" 对齐
-            document = dev.langchain4j.data.document.Document.from(
-                    markdownContent,
-                    dev.langchain4j.data.document.Metadata.from("file_name", fileName)
-            );
-            System.out.println("✅ LlamaParse 视觉解析完成！");
-
-        } else {
-            System.out.println("📄 检测到普通文件，使用基础 fileParser 解析...");
-            // txt、word 等其他格式，依然走你原来写好的解析器
-            document = fileParser.parseToDocument(localFile, fileName);
-        }
-
-        // 2. 切片 & 3. 向量化存入 (这部分完全不用动)
-        vectorEmbedder.ingest(document, textChunker.getSplitter());
-        System.out.println("✅ [步骤2] 新版本文件解析入库成功！");
+        // 3. 立刻结束主线程，前端会立刻收到 Success！
+        System.out.println("🚀 [主线程] 任务已推入后台队列，主请求结束响应！");
     }
 
     @Override
     public AskResponseData askQuestion(String question) {
+
+        // 🛑 核心拦截逻辑：发现还在解析，直接拒绝回答
+        if (statusManager.hasProcessingTasks()) {
+            System.out.println("🚧 [拦截] 检测到有文件正在解析，拒绝提问。");
+            AskResponseData waitResult = new AskResponseData();
+            waitResult.setAnswer("⏳ 抱歉，我正在努力阅读和解析您刚刚上传的文件，大概还需要一两分钟，请稍后再问我哦！");
+            waitResult.setSources(new ArrayList<>());
+            return waitResult;
+        }
         // 1. 将问题向量化
         dev.langchain4j.data.embedding.Embedding queryVector = vectorEmbedder.embedText(question);
 

@@ -41,12 +41,11 @@ src/main/resources/application.yaml
 
 # 2. 忽略本地运行产生的文件上传存储目录
 uploads/
-
-# 3. 忽略 Chroma 数据库可能在本地生成的持久化数据目录 (如果你后续配置了 Chroma 本地持久化)
-chroma_data/
-
-# 4. 忽略 Spring Boot 运行日志
+# 3. 忽略 Spring Boot 运行日志
 *.log
 
-# 5. 操作系统产生的隐藏缓存文件 (尤其是 macOS)
+# 4. 操作系统产生的隐藏缓存文件 (尤其是 macOS)
 .DS_Store
+
+# 5. Ignore local Chroma vector database data
+.chroma_data/
