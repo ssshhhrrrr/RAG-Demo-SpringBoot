@@ -76,10 +76,29 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         System.out.println("💾 [步骤1] 新版本文件已保存至: " + localFile.getAbsolutePath());
 
 
-        // 🌟 核心主干逻辑：就像流水线一样清晰
-        // 1. 解析
-        Document document = fileParser.parseToDocument(localFile, fileName);
-        // 2. 切片 & 3. 向量化存入
+        // 🌟 核心主干逻辑：加入智能分流路由
+        Document document;
+
+        // 1. 解析 (分流处理)
+        if (fileName.toLowerCase().endsWith(".pdf")) {
+            System.out.println("🤖 检测到 PDF，正在呼叫 LlamaParse 视觉大模型进行解析...");
+            // 调用 LlamaParse 工具类获取带图注的 Markdown
+            String markdownContent = com.ikko.rag_demo.util.LlamaParseUtil.parsePdfToMarkdown(localFile);
+
+            // 包装成 LangChain4j 的 Document，注意这里的元数据 key 要和你检索时用的 "file_name" 对齐
+            document = dev.langchain4j.data.document.Document.from(
+                    markdownContent,
+                    dev.langchain4j.data.document.Metadata.from("file_name", fileName)
+            );
+            System.out.println("✅ LlamaParse 视觉解析完成！");
+
+        } else {
+            System.out.println("📄 检测到普通文件，使用基础 fileParser 解析...");
+            // txt、word 等其他格式，依然走你原来写好的解析器
+            document = fileParser.parseToDocument(localFile, fileName);
+        }
+
+        // 2. 切片 & 3. 向量化存入 (这部分完全不用动)
         vectorEmbedder.ingest(document, textChunker.getSplitter());
         System.out.println("✅ [步骤2] 新版本文件解析入库成功！");
     }
