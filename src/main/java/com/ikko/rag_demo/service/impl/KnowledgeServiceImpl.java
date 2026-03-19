@@ -96,14 +96,16 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     @Override
     public AskResponseData askQuestion(String question) {
 
-        // 🛑 核心拦截逻辑：发现还在解析，直接拒绝回答
-        if (statusManager.hasProcessingTasks()) {
-            System.out.println("🚧 [拦截] 检测到有文件正在解析，拒绝提问。");
-            AskResponseData waitResult = new AskResponseData();
-            waitResult.setAnswer("⏳ 抱歉，我正在努力阅读和解析您刚刚上传的文件，大概还需要一两分钟，请稍后再问我哦！");
-            waitResult.setSources(new ArrayList<>());
-            return waitResult;
+        // 1. 🔍 柔性探测：获取当前正在解析的文件，不再抛出异常阻断流程！
+        List<String> parsingFiles = statusManager.getCurrentlyParsingFiles();
+        String noticeMessage = "";
+        if (!parsingFiles.isEmpty()) {
+            String fileNames = String.join("、", parsingFiles);
+            // 拼装一个友好的提示语
+            noticeMessage = "💡温馨提示：您上传的文档【" + fileNames + "】仍在后台努力解析中，因此本次回答暂未包含该文档的最新知识哦。\n\n";
+            System.out.println("⚠️ [降级响应] 用户发起了提问，但存在未解析完的文件: " + fileNames);
         }
+
         // 1. 将问题向量化
         dev.langchain4j.data.embedding.Embedding queryVector = vectorEmbedder.embedText(question);
 
@@ -129,8 +131,10 @@ public class KnowledgeServiceImpl implements KnowledgeService {
 
         // 5. 封装返回结果
         AskResponseData result = new AskResponseData();
-        result.setAnswer(aiAnswer);
+        // 💡 核心修改点：将温馨提示（如果有的话）拼接到 AI 答案的最前面！
+        result.setAnswer(noticeMessage + aiAnswer);
         result.setSources(sources);
+
         return result;
     }
 }
