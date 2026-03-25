@@ -18,6 +18,9 @@ import java.util.Map;
 
 import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
 
+/**
+ * @author shenhaoran
+ */
 @Component
 public class VectorEmbedder {
     private final EmbeddingStore<TextSegment> embeddingStore;

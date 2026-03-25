@@ -6,6 +6,16 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # 🌟 核心魔法：把数据挂载到项目根目录的 .chroma_data 文件夹下
       - ./.chroma_data:/chroma/chroma
     restart: unless-stopped
+
+#  redis:
+#    image: redis:7.2-alpine
+#    container_name: rag-redis
+#    ports:
+#      - "6379:6379"
+#    volumes:
+#      - ./.redis_data:/data
+#    # 强制开启 AOF 持久化，这样才会真正把聊天记忆写入到映射的 /data 目录中！
+#    command: redis-server --appendonly yes
+#    restart: unless-stopped

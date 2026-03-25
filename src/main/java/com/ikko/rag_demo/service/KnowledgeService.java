@@ -2,6 +2,7 @@ package com.ikko.rag_demo.service;
 
 import com.ikko.rag_demo.dto.AskResponseData;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
  * 知识库核心业务接口
@@ -16,6 +17,8 @@ public interface KnowledgeService {
      */
     void processAndStoreDocument(MultipartFile file) throws Exception;
     // 记得导入刚才写的 AskResponseData
-    AskResponseData askQuestion(String question);
+    AskResponseData askQuestion(String sessionId, String question);
+
+    void askQuestionStream(String sessionId, String question, SseEmitter emitter);
 
 }

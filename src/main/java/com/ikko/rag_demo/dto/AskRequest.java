@@ -1,14 +1,23 @@
 package com.ikko.rag_demo.dto;
 
-import lombok.Data;
-
-/**
- * 接收前端提问的请求体
- */
-@Data
 public class AskRequest {
-    
-    // 用户提出的问题
+    // 用于区分不同用户的会话
+    private String sessionId;
     private String question;
-    
+
+    public String getSessionId() {
+        return sessionId;
+    }
+
+    public void setSessionId(String sessionId) {
+        this.sessionId = sessionId;
+    }
+
+    public String getQuestion() {
+        return question;
+    }
+
+    public void setQuestion(String question) {
+        this.question = question;
+    }
 }

@@ -31,7 +31,8 @@ public class DocumentAsyncProcessorImpl implements DocumentAsyncProcessor {
     }
 
     @Override
-    @Async // 🌟 魔法依旧在这里：重写的方法在独立线程中运行
+    // 核心：明确把重活扔进干重活的池子
+    @Async("docAsyncExecutor")
     public void executeIngestionTask(File localFile, String fileName) {
         System.out.println("🧵 [异步线程启动] 开始后台处理文件: " + fileName);
         try {

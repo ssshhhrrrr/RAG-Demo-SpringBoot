@@ -10,6 +10,9 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+/**
+ * @author shenhaoran
+ */
 @Service // 🌟 声明这是一个服务实现类，Spring 会把它注入到需要接口的地方
 public class CaffeineTaskStatusManagerImpl implements TaskStatusManager {
 

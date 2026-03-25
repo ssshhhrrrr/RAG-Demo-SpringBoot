@@ -1,20 +1,21 @@
 package com.ikko.rag_demo.config;
 
 import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
+import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * AI 大模型核心配置类
+ * AI 大模型核心配置类 (全线采用 OpenAI 兼容协议接入阿里云)
  */
 @Configuration
 public class AiConfig {
 
-    // 从 application.yml 中动态读取配置
     @Value("${ai.aliyun.api-key}")
     private String apiKey;
 
@@ -24,25 +25,35 @@ public class AiConfig {
     @Value("${ai.aliyun.model-name}")
     private String modelName;
 
-    /**
-     * 注册 ChatLanguageModel Bean，供 generator 模块使用
-     */
+    // 1. 同步对话模型 (备用)
     @Bean
     public ChatLanguageModel chatLanguageModel() {
         return OpenAiChatModel.builder()
                 .baseUrl(baseUrl)
                 .apiKey(apiKey)
                 .modelName(modelName)
-                .temperature(0.3) // 设低一点，让回答更严谨，更贴合知识库原文
+                .temperature(0.3) // 设低一点，让回答更严谨，防幻觉
                 .build();
     }
-    // 🌟 核心优化 1：注入阿里云的多语言向量模型
+
+    // 2. 向量检索模型 (查字典专用)
     @Bean
     public EmbeddingModel embeddingModel() {
         return OpenAiEmbeddingModel.builder()
                 .baseUrl(baseUrl)
                 .apiKey(apiKey)
-                .modelName("text-embedding-v3") // 阿里云目前最强的多语言向量模型
+                .modelName("text-embedding-v3")
+                .build();
+    }
+
+    // 🌟 3. 新增：流式对话模型 (打字机效果专用)
+    @Bean
+    public StreamingChatLanguageModel streamingChatLanguageModel() {
+        return OpenAiStreamingChatModel.builder()
+                .baseUrl(baseUrl) // 同样注入阿里云的兼容地址
+                .apiKey(apiKey)
+                .modelName(modelName) // 直接复用你 application.yml 里配置的模型名 (比如 qwen-plus)
+                .temperature(0.3) // 同样控制一下严谨度
                 .build();
     }
 }

@@ -1,6 +1,9 @@
 package com.ikko.rag_demo.service.impl;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ikko.rag_demo.config.RedisChatMemoryStore;
 import com.ikko.rag_demo.dto.AskResponseData;
+import com.ikko.rag_demo.dto.StreamResponse;
 import com.ikko.rag_demo.rag.chunker.TextChunker;
 import com.ikko.rag_demo.rag.embedding.VectorEmbedder;
 import com.ikko.rag_demo.rag.generator.LlmGenerator;
@@ -9,21 +12,33 @@ import com.ikko.rag_demo.rag.retriever.VectorRetriever;
 import com.ikko.rag_demo.service.DocumentAsyncProcessor;
 import com.ikko.rag_demo.service.KnowledgeService;
 import com.ikko.rag_demo.service.TaskStatusManager;
-import dev.langchain4j.data.document.Document;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.data.segment.TextSegment;
+import dev.langchain4j.memory.ChatMemory;
+import dev.langchain4j.memory.chat.MessageWindowChatMemory;
+import dev.langchain4j.model.StreamingResponseHandler;
+import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.StreamingChatLanguageModel;
+import dev.langchain4j.model.output.Response;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- *
- * 服务实现类
+ * 知识库服务实现类 - 增强版
  * @author shenhaoran
  */
 @Service
@@ -32,18 +47,29 @@ public class KnowledgeServiceImpl implements KnowledgeService {
     @Value("${file.upload-dir:./uploads}")
     private String uploadDir;
 
-    // 🌟 注入我们刚刚写好的 5 大金刚
     private final FileParser fileParser;
     private final TextChunker textChunker;
     private final VectorEmbedder vectorEmbedder;
     private final VectorRetriever vectorRetriever;
     private final LlmGenerator llmGenerator;
-    // 🌟 注入刚写的异步类
+
     @Autowired
     private DocumentAsyncProcessor asyncProcessor;
-    // 依然是注入接口，Spring 会自动找到 CaffeineTaskStatusManagerImpl
     @Autowired
     private TaskStatusManager statusManager;
+    @Autowired
+    private StreamingChatLanguageModel streamingLlmGenerator;
+    @Autowired
+    private ChatLanguageModel syncChatLanguageModel;
+    @Autowired
+    private RedisChatMemoryStore redisChatMemoryStore;
+
+    // 🌟 注入你在配置类中定义的专属线程池
+    @Autowired
+    @Qualifier("aiStreamExecutor")
+    private Executor aiStreamExecutor;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public KnowledgeServiceImpl(FileParser fileParser, TextChunker textChunker,
                                 VectorEmbedder vectorEmbedder, VectorRetriever vectorRetriever,
@@ -55,67 +81,50 @@ public class KnowledgeServiceImpl implements KnowledgeService {
         this.llmGenerator = llmGenerator;
     }
 
+    private ChatMemory getOrCreateChatMemory(String sessionId) {
+        return MessageWindowChatMemory.builder()
+                .id(sessionId)
+                .maxMessages(10)
+                .chatMemoryStore(redisChatMemoryStore)
+                .build();
+    }
+
     @Override
     public void processAndStoreDocument(MultipartFile file) throws Exception {
         String fileName = file.getOriginalFilename();
-        if (fileName == null || fileName.trim().isEmpty()) {
-            throw new IllegalArgumentException("上传的文件名不能为空！");
+        if (fileName == null || fileName.isEmpty()) {
+            throw new IllegalArgumentException("文件名不能为空");
         }
 
         File dir = new File(uploadDir).getAbsoluteFile();
         if (!dir.exists()) {
             dir.mkdirs();
         }
+
         File localFile = new File(dir, fileName);
-        // 🌟 核心升级：同名文件自动清理与覆盖逻辑
         if (localFile.exists()) {
-            System.out.println("⚠️ [更新流程] 发现同名文件 [" + fileName + "]，正在执行覆盖更新...");
-
-            // 1. 抹除记忆：通知 VectorEmbedder 清理 Chroma 里的旧向量
             vectorEmbedder.deleteOldVectorsByFileName(fileName);
-
-            // 2. 斩断现实：删除旧的物理文件
             localFile.delete();
-            System.out.println("♻️ [更新流程] 旧文件及旧向量已清理完毕。");
         }
-
-        // 1. 瞬间完成：物理文件存盘
         file.transferTo(localFile);
-        System.out.println("💾 [主线程] 文件已火速保存至硬盘");
-
-        // 🌟 登记造册：状态标记为处理中
         statusManager.setStatus(fileName, "PROCESSING");
-
-        // 扔给后台线程 (非阻塞)
         asyncProcessor.executeIngestionTask(localFile, fileName);
-
-        // 3. 立刻结束主线程，前端会立刻收到 Success！
-        System.out.println("🚀 [主线程] 任务已推入后台队列，主请求结束响应！");
     }
 
+    /**
+     * 同步提问逻辑
+     */
     @Override
-    public AskResponseData askQuestion(String question) {
-
-        // 1. 🔍 柔性探测：获取当前正在解析的文件，不再抛出异常阻断流程！
+    public AskResponseData askQuestion(String sessionId, String question) {
         List<String> parsingFiles = statusManager.getCurrentlyParsingFiles();
-        String noticeMessage = "";
-        if (!parsingFiles.isEmpty()) {
-            String fileNames = String.join("、", parsingFiles);
-            // 拼装一个友好的提示语
-            noticeMessage = "💡温馨提示：您上传的文档【" + fileNames + "】仍在后台努力解析中，因此本次回答暂未包含该文档的最新知识哦。\n\n";
-            System.out.println("⚠️ [降级响应] 用户发起了提问，但存在未解析完的文件: " + fileNames);
-        }
+        String noticeMessage = parsingFiles.isEmpty() ? "" :
+                "💡温馨提示：文档【" + String.join("、", parsingFiles) + "】正在解析，暂未包含其最新知识。\n\n";
 
-        // 1. 将问题向量化
         dev.langchain4j.data.embedding.Embedding queryVector = vectorEmbedder.embedText(question);
-
-        // 2. 检索相关片段
         List<EmbeddingMatch<TextSegment>> matches = vectorRetriever.search(queryVector, 5, 0.5);
 
-        // 3. 组装上下文和溯源信息
         List<AskResponseData.Source> sources = new ArrayList<>();
         StringBuilder contextBuilder = new StringBuilder();
-
         for (EmbeddingMatch<TextSegment> match : matches) {
             AskResponseData.Source source = new AskResponseData.Source();
             source.setChunkId(match.embeddingId());
@@ -125,16 +134,113 @@ public class KnowledgeServiceImpl implements KnowledgeService {
             contextBuilder.append(match.embedded().text()).append("\n\n");
         }
 
-        // 4. 调用大模型生成答案
-        String aiAnswer = llmGenerator.generateAnswer(question, contextBuilder.toString());
-        System.out.println("答案已经生成");
+        String finalSessionId = (sessionId == null || sessionId.isEmpty()) ? "default-session" : sessionId;
+        ChatMemory chatMemory = getOrCreateChatMemory(finalSessionId);
 
-        // 5. 封装返回结果
+        List<ChatMessage> tempMessages = new ArrayList<>(chatMemory.messages());
+        String enrichedPrompt = "参考资料：\n" + contextBuilder + "\n\n问题：" + question;
+        tempMessages.add(UserMessage.from(enrichedPrompt));
+
+        Response<AiMessage> response = syncChatLanguageModel.generate(tempMessages);
+
+        // 存储纯净对话
+        chatMemory.add(UserMessage.from(question));
+        chatMemory.add(response.content());
+
         AskResponseData result = new AskResponseData();
-        // 💡 核心修改点：将温馨提示（如果有的话）拼接到 AI 答案的最前面！
-        result.setAnswer(noticeMessage + aiAnswer);
+        result.setAnswer(noticeMessage + response.content().text());
         result.setSources(sources);
-
         return result;
+    }
+
+    /**
+     * 流式提问逻辑 - 深度优化版
+     */
+    @Override
+    public void askQuestionStream(String sessionId, String question, SseEmitter emitter) {
+        // 🌟 1. 立即检查解析状态（主线程执行，响应最快）
+        List<String> parsingFiles = statusManager.getCurrentlyParsingFiles();
+        if (!parsingFiles.isEmpty()) {
+            try {
+                String tip = "💡温馨提示：文档【" + String.join("、", parsingFiles) + "】仍在努力解析中，本次回答暂未包含其内容哦。";
+                emitter.send(objectMapper.writeValueAsString(new StreamResponse("warning", tip)));
+            } catch (IOException e) {
+                emitter.completeWithError(e);
+                return;
+            }
+        }
+
+        // 🌟 2. 将耗时的检索逻辑放入专属线程池
+        aiStreamExecutor.execute(() -> {
+            try {
+                // 执行向量检索
+                dev.langchain4j.data.embedding.Embedding queryVector = vectorEmbedder.embedText(question);
+                List<EmbeddingMatch<TextSegment>> matches = vectorRetriever.search(queryVector, 5, 0.5);
+
+                StringBuilder contextBuilder = new StringBuilder();
+                StringBuilder sourceTextBuilder = new StringBuilder("\n\n---\n📚 参考资料：\n");
+                for (int i = 0; i < matches.size(); i++) {
+                    TextSegment segment = matches.get(i).embedded();
+                    contextBuilder.append(segment.text()).append("\n\n");
+                    sourceTextBuilder.append(i + 1).append(". [").append(segment.metadata().getString("file_name")).append("] ")
+                            .append(segment.text()).append("\n");
+                }
+
+                // 准备记忆
+                String finalSessionId = (sessionId == null || sessionId.isEmpty()) ? "default-session" : sessionId;
+                ChatMemory chatMemory = getOrCreateChatMemory(finalSessionId);
+                List<ChatMessage> tempMessages = new ArrayList<>(chatMemory.messages());
+                tempMessages.add(UserMessage.from("参考资料：\n" + contextBuilder + "\n\n问题：" + question));
+
+                // 🌟 3. 设置原子锁，防止重复写入 Redis
+                AtomicBoolean isHandled = new AtomicBoolean(false);
+
+                streamingLlmGenerator.generate(tempMessages, new StreamingResponseHandler<AiMessage>() {
+                    @Override
+                    public void onNext(String token) {
+                        try {
+                            emitter.send(objectMapper.writeValueAsString(new StreamResponse("text", token)));
+                        } catch (Exception e) {
+                            emitter.completeWithError(e);
+                        }
+                    }
+
+                    @Override
+                    public void onComplete(Response<AiMessage> response) {
+                        // 🌟 4. 确保逻辑只执行一次（防重核心）
+                        System.out.println("🚩 [Debug] onComplete 被调用了！SessionId: " + finalSessionId);
+                        if (isHandled.compareAndSet(false, true)) {
+                            try {
+                                // 持久化纯净对话到 Redis
+                                chatMemory.add(UserMessage.from(question));
+                                chatMemory.add(response.content());
+
+                                // 发送溯源信息和结束信号
+                                emitter.send(objectMapper.writeValueAsString(new StreamResponse("source", sourceTextBuilder.toString())));
+                                emitter.send(objectMapper.writeValueAsString(new StreamResponse("done", "FINISHED")));
+                                emitter.complete();
+                                System.out.println("✅ 流式任务处理完毕并已存入 Redis");
+                            } catch (Exception e) {
+                                emitter.completeWithError(e);
+                            }
+                        }
+                    }
+
+                    @Override
+                    public void onError(Throwable error) {
+                        if (isHandled.compareAndSet(false, true)) {
+                            try {
+                                emitter.send(objectMapper.writeValueAsString(new StreamResponse("error", error.getMessage())));
+                            } catch (Exception ignored) {}
+                            emitter.completeWithError(error);
+                        }
+                    }
+                });
+
+            } catch (Exception e) {
+                System.err.println("❌ 异步处理发生异常：" + e.getMessage());
+                emitter.completeWithError(e);
+            }
+        });
     }
 }
