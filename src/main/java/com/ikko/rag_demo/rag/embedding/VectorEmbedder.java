@@ -9,9 +9,14 @@ import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import dev.langchain4j.store.embedding.EmbeddingStoreIngestor;
 import dev.langchain4j.store.embedding.filter.Filter;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.util.DigestUtils;
 import org.springframework.web.client.RestTemplate;
 
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,8 +28,15 @@ import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metad
  */
 @Component
 public class VectorEmbedder {
+    @Autowired
     private final EmbeddingStore<TextSegment> embeddingStore;
+
+    @Autowired
     private final EmbeddingModel embeddingModel;
+
+    // 🌟 注入我们现成的 Redis 工具
+    @Autowired
+    private StringRedisTemplate redisTemplate;
 
     // 🌟 新增：Spring 自带的 HTTP 请求工具
     private final RestTemplate restTemplate = new RestTemplate();
@@ -62,6 +74,8 @@ public class VectorEmbedder {
         }
     }
 
+
+
 //    /**
 //     * 根据文件名，调用 Chroma 原生 API 删除旧向量
 //     */
@@ -78,4 +92,50 @@ public class VectorEmbedder {
     }
 }
 
+    /**
+     * 🌟 终极前置防重版：利用 Redis 拦截重复切片
+     */
+    public void embedAndStoreWithDeduplication(List<TextSegment> segments) {
+        if (segments == null || segments.isEmpty()) {
+            return;
+        }
+
+        // 专门用来装“真正没见过的新切片”的篮子
+        List<TextSegment> uniqueSegments = new ArrayList<>();
+
+        for (TextSegment segment : segments) {
+            String rawText = segment.text();
+            // 1. 计算文本切片的 MD5 指纹
+            String md5Hash = DigestUtils.md5DigestAsHex(rawText.getBytes(StandardCharsets.UTF_8));
+
+            // 2. 拼接 Redis Key (加上你的业务前缀，防冲突)
+            String redisKey = "rag:chunk:md5:" + md5Hash;
+
+            // 3. 🌟 降维打击：利用 Redis 的 SETNX (Set If Not Exists) 命令实现极速判断
+            // 如果 Key 不存在，存入并返回 true；如果 Key 已存在，什么都不做并返回 false
+            Boolean isNew = redisTemplate.opsForValue().setIfAbsent(redisKey, "1");
+
+            if (Boolean.TRUE.equals(isNew)) {
+                // 是新切片！放进篮子里准备处理
+                uniqueSegments.add(segment);
+            } else {
+                // 是重复切片！直接抛弃，连 Embedding 的钱都省了！
+                System.out.println("♻️ [拦截] 发现重复切片，已过滤！MD5: " + md5Hash);
+            }
+        }
+
+        // 如果过滤完之后，发现全是重复的，直接收工回家
+        if (uniqueSegments.isEmpty()) {
+            System.out.println("⚠️ [跳过] 所有切片均已存在，无需请求大模型和入库！");
+            return;
+        }
+
+        // 4. 🌟 仅仅对“真正全新的切片”请求大模型生成向量（极其省钱、极速！）
+        List<Embedding> embeddings = embeddingModel.embedAll(uniqueSegments).content();
+
+        // 5. 调用官方最原生的方法，毫无阻碍地存入 ChromaDB
+        embeddingStore.addAll(embeddings, uniqueSegments);
+
+        System.out.println("✅ [成功] 已过滤重复数据，将 " + uniqueSegments.size() + " 个全新切片存入向量库！");
+    }
 }
