@@ -36,8 +36,11 @@ build/
 # 🚨 RAG 业务自定义与机密安全隔离 (必须添加)
 # ==========================================
 
-# 1. 绝对禁止提交包含真实 API Key 的配置文件！
-src/main/resources/application.yaml
+# 1. 提交通用配置模板，忽略本地私有配置
+src/main/resources/application-local.yaml
+src/main/resources/application-private.yaml
+.env
+.env.*
 
 # 2. 忽略本地运行产生的文件上传存储目录
 uploads/

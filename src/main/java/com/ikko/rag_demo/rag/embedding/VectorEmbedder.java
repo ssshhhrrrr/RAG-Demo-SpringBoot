@@ -92,6 +92,16 @@ public class VectorEmbedder {
     }
 }
 
+    public void deleteOldVectorsByFilePath(String filePath) {
+        try {
+            Filter filter = metadataKey("file_path").isEqualTo(filePath);
+            embeddingStore.removeAll(filter);
+            System.out.println("🗑️ [向量清理] 已成功清除旧路径 [" + filePath + "] 的历史切片！");
+        } catch (Exception e) {
+            System.err.println("❌ [向量清理] 按文件路径清理失败: " + e.getMessage());
+        }
+    }
+
     /**
      * 🌟 终极前置防重版：利用 Redis 拦截重复切片
      */

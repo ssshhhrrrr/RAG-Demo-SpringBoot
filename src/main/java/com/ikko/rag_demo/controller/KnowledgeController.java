@@ -5,14 +5,11 @@ import com.ikko.rag_demo.dto.AskResponseData;
 import com.ikko.rag_demo.dto.BaseResponse; // 🌟 引入刚建的 DTO
 import com.ikko.rag_demo.service.KnowledgeService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
-
-import java.util.concurrent.Executor;
 
 /**
  * @author shenhaoran
@@ -23,11 +20,6 @@ public class KnowledgeController {
 
 
     private final KnowledgeService knowledgeService;
-
-    // 注入我们配置好的专属线程池
-    @Autowired
-    @Qualifier("aiStreamExecutor")
-    private Executor aiStreamExecutor;
 
     public KnowledgeController(KnowledgeService knowledgeService) {
         this.knowledgeService = knowledgeService;
@@ -81,17 +73,8 @@ public class KnowledgeController {
         }
 
         SseEmitter emitter = new SseEmitter(0L);
-
-        aiStreamExecutor.execute(() -> {
-            try {
-                // 🌟 将 sessionId 传给下游
-                knowledgeService.askQuestionStream(request.getSessionId(), request.getQuestion(), emitter);
-            } catch (Exception e) {
-                emitter.completeWithError(e);
-            }
-        });
+        knowledgeService.askQuestionStream(request.getSessionId(), request.getQuestion(), emitter);
 
         return emitter;
     }
 }
-
