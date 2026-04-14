@@ -1,0 +1,48 @@
+server:
+  port: 8080 # 🌟 设置后端服务的运行端口
+
+spring:
+  config:
+    import: optional:classpath:application-local.yaml
+  servlet:
+    multipart:
+      # 🌟 需求 5.1：支持上传文档，这里设置文件大小限制，防止上传大文件报错
+      max-file-size: 50MB
+      max-request-size: 50MB
+
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+
+# 自定义文件上传配置
+file:
+  upload-dir: ./uploads  # 物理文件保存路径
+
+# ==========================================
+# 🌟 核心修改点：新增阿里云百炼配置 (供 AiConfig.java 读取)
+# ==========================================
+# ==========================================
+# 🌟 核心修改点：新增阿里云百炼配置 (供 AiConfig.java 读取)
+# ==========================================
+ai:
+  aliyun:
+    api-key: ${AI_ALIYUN_API_KEY:}
+    base-url: ${AI_ALIYUN_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+    model-name: ${AI_ALIYUN_MODEL_NAME:qwen-plus}
+
+  rerank:
+    aliyun:
+      # 👈 直接引用上面的 key，防止未来换 key 时漏改
+      api-key: ${AI_RERANK_ALIYUN_API_KEY:${AI_ALIYUN_API_KEY:}}
+      api-url: ${AI_RERANK_ALIYUN_API_URL:https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank}
+      model: ${AI_RERANK_ALIYUN_MODEL:gte-rerank-v2}
+
+    siliconflow:
+      api-key: ${AI_RERANK_SILICONFLOW_API_KEY:}
+      api-url: ${AI_RERANK_SILICONFLOW_API_URL:https://api.siliconflow.cn/v1/rerank}
+      model: ${AI_RERANK_SILICONFLOW_MODEL:BAAI/bge-reranker-v2-m3}
+
+  llama-parse:
+    api-key: ${LLAMA_PARSE_API_KEY:}
+    base-url: ${LLAMA_PARSE_BASE_URL:https://api.cloud.llamaindex.ai/api/parsing}

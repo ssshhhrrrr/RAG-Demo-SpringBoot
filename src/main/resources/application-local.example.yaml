@@ -1,0 +1,26 @@
+# 本地私有配置模板
+# 使用方式：
+# 1. 复制当前文件为 application-local.yaml
+# 2. 填入你自己的真实 key
+# 3. application-local.yaml 已被 .gitignore 忽略，不会提交到仓库
+
+ai:
+  aliyun:
+    api-key: your-aliyun-api-key
+    base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    model-name: qwen-plus
+
+  rerank:
+    aliyun:
+      api-key: your-aliyun-rerank-api-key
+      api-url: https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank
+      model: gte-rerank-v2
+
+    siliconflow:
+      api-key: your-siliconflow-api-key
+      api-url: https://api.siliconflow.cn/v1/rerank
+      model: BAAI/bge-reranker-v2-m3
+
+  llama-parse:
+    api-key: your-llama-parse-api-key
+    base-url: https://api.cloud.llamaindex.ai/api/parsing
